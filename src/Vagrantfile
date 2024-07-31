@@ -1,0 +1,123 @@
+Vagrant.configure("2") do |config|
+  config.vm.define "manager01" do |manager|
+    manager.vm.box = "ubuntu/jammy64"
+    manager.vm.network "private_network", type: "dhcp"
+    manager.vm.provider "virtualbox" do |vb|
+      vb.memory = "2048"
+    end
+
+    manager.vm.provision "shell", inline: <<-SHELL
+      # Установка Docker и Docker Compose
+      sudo apt-get update
+      sudo apt-get install -y docker.io curl
+
+      sudo usermod -aG docker vagrant
+
+      sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      sudo chmod +x /usr/local/bin/docker-compose
+
+      # Инициализация Docker Swarm если он еще не инициализирован
+      if ! docker info | grep -q "Swarm: active"; then
+        docker swarm init --advertise-addr $(hostname -I | awk '{print $2}')
+      else
+        echo "Docker Swarm уже инициализирован."
+      fi
+
+      # Получение токена и IP адреса менеджера
+      SWARM_TOKEN=$(docker swarm join-token worker -q)
+      MANAGER_IP=$(hostname -I | awk '{print $2}')
+
+      echo $SWARM_TOKEN > /vagrant/swarm_token
+      echo $MANAGER_IP > /vagrant/manager_ip
+
+      # Создание Docker конфигураций
+      if ! docker config ls | grep -q "nginx_config"; then
+        echo "Создание Docker конфигурации nginx_config..."
+        docker config create nginx_config /home/vagrant/src/services/nginx/nginx.conf || { echo "Не удалось создать nginx_config"; exit 1; }
+      else
+        echo "Docker конфигурация nginx_config уже существует."
+      fi
+
+      # Логин в Docker Hub
+      echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+      # Сборка и публикация Docker образов
+      cd /home/vagrant/src
+      services=("session-service" "hotel-service" "payment-service" "loyalty-service" "report-service" "booking-service" "gateway-service" "nginx")
+      for service in "${services[@]}"; do
+        cd "./services/$service"
+        chmod +x mvnw
+        docker build -t "digglega/$service:latest" .
+        docker push "digglega/$service:latest"
+        cd ../..
+      done
+
+      # Создание Docker сети
+      docker network create --driver overlay my_stack_network
+
+      # Развертывание стека
+      docker stack deploy -c docker-compose.yml my_stack
+    SHELL
+
+    manager.vm.synced_folder "/home/garik/Documents/s21_projects/DevOps_7-1/src", "/home/vagrant/src", type: "rsync"
+  end
+
+  config.vm.define "worker01" do |worker|
+    worker.vm.box = "ubuntu/jammy64"
+    worker.vm.network "private_network", type: "dhcp"
+    worker.vm.provider "virtualbox" do |vb|
+      vb.memory = "2048"
+    end
+
+    worker.vm.provision "shell", inline: <<-SHELL
+      # Установка Docker и Docker Compose
+      sudo apt-get update
+      sudo apt-get install -y docker.io curl
+
+      sudo usermod -aG docker vagrant
+
+      sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      sudo chmod +x /usr/local/bin/docker-compose
+
+      # Ожидание появления токена Swarm
+      while [ ! -f /vagrant/swarm_token ]; do
+        sleep 1
+      done
+      SWARM_TOKEN=$(cat /vagrant/swarm_token)
+      MANAGER_IP=$(cat /vagrant/manager_ip)
+
+      # Присоединение к Docker Swarm
+      docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377
+    SHELL
+  end
+
+  config.vm.define "worker02" do |worker|
+    worker.vm.box = "ubuntu/jammy64"
+    worker.vm.network "private_network", type: "dhcp"
+    worker.vm.provider "virtualbox" do |vb|
+      vb.memory = "2048"
+    end
+
+    worker.vm.provision "shell", inline: <<-SHELL
+      # Установка Docker и Docker Compose
+      sudo apt-get update
+      sudo apt-get install -y docker.io curl
+
+      sudo usermod -aG docker vagrant
+
+      sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      sudo chmod +x /usr/local/bin/docker-compose
+
+      # Ожидание появления токена Swarm
+      while [ ! -f /vagrant/swarm_token ]; do
+        sleep 1
+      done
+      SWARM_TOKEN=$(cat /vagrant/swarm_token)
+      MANAGER_IP=$(cat /vagrant/manager_ip)
+
+      # Присоединение к Docker Swarm
+      docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377
+    SHELL
+  end
+end
+

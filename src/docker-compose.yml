@@ -1,0 +1,186 @@
+version: '3.8'
+
+services:
+  session-service:
+    image: digglega/session-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: users_db
+    depends_on:
+      - database
+      - rabbitmq
+    networks:
+      - my_stack_network
+    ports:
+      - "8081:8081"
+
+  hotel-service:
+    image: digglega/hotel-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hotels_db
+    depends_on:
+      - database
+      - rabbitmq
+    networks:
+      - my_stack_network
+    ports:
+      - "8082:8082"
+
+  payment-service:
+    image: digglega/payment-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payments_db
+    depends_on:
+      - database
+      - rabbitmq
+    networks:
+      - my_stack_network
+    ports:
+      - "8084:8084"
+
+  loyalty-service:
+    image: digglega/loyalty-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: balances_db
+    depends_on:
+      - database
+      - rabbitmq
+    networks:
+      - my_stack_network
+    ports:
+      - "8085:8085"
+
+  report-service:
+    image: digglega/report-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: statistics_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: guest
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+    depends_on:
+      - database
+      - rabbitmq
+    networks:
+      - my_stack_network
+    ports:
+      - "8086:8086"
+
+  booking-service:
+    image: digglega/booking-service:latest
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reservations_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: guest
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+    depends_on:
+      - database
+      - rabbitmq
+      - hotel-service
+      - payment-service
+      - loyalty-service
+    networks:
+      - my_stack_network
+    ports:
+      - "8083:8083"
+
+  gateway-service:
+    image: digglega/gateway-service:latest
+    environment:
+      SESSION_SERVICE_HOST: session-service
+      SESSION_SERVICE_PORT: 8081
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      BOOKING_SERVICE_HOST: booking-service
+      BOOKING_SERVICE_PORT: 8083
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+      REPORT_SERVICE_HOST: report-service
+      REPORT_SERVICE_PORT: 8086
+    depends_on:
+      - session-service
+      - hotel-service
+      - booking-service
+      - payment-service
+      - loyalty-service
+      - report-service
+    networks:
+      - my_stack_network
+    ports:
+      - "8087:8087"
+
+  database:
+    image: digglega/database:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    networks:
+      - my_stack_network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - my_stack_network
+
+  nginx:
+    image: digglega/nginx:latest
+    ports:
+      - "80:80"
+    configs:
+      - source: nginx_config
+        target: /etc/nginx/nginx.conf
+    depends_on:
+      - gateway-service
+      - session-service
+    networks:
+      - my_stack_network
+
+configs:
+  nginx_config:
+    external: true
+
+networks:
+  my_stack_network:
+    driver: overlay
+    external: true

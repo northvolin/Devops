@@ -1,0 +1,46 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Log in to Docker Hub
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+    - name: Build and push Docker images
+      run: |
+        services=("session-service" "hotel-service" "payment-service" "loyalty-service" "report-service" "booking-service" "gateway-service")
+        for service in "${services[@]}"; do
+          cd services/$service
+          docker build -t your-dockerhub-username/$service:latest .
+          docker push your-dockerhub-username/$service:latest
+          cd ../..
+        done
+
+    - name: Deploy services
+      run: |
+        sudo docker-compose down
+        sudo docker-compose up -d
+
+    - name: Run tests
+      run: |
+        if command -v newman &> /dev/null; then
+          newman run application_tests.postman_collection.json
+        else
+          echo "Newman is not installed. Skipping Postman tests."
+        fi
+
+    - name: Clean up
+      run: sudo docker-compose down
