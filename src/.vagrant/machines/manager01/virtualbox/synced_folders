@@ -1,0 +1,1 @@
+{"rsync":{"/home/vagrant/src":{"type":"rsync","guestpath":"/home/vagrant/src","hostpath":"/home/digglega/Documents/s21_projects/DevOps_7-1/src","disabled":false,"__vagrantfile":true,"owner":"vagrant","group":"vagrant"}},"virtualbox":{"/vagrant":{"guestpath":"/vagrant","hostpath":"/home/digglega/Documents/s21_projects/DevOps_7-1/src","disabled":false,"__vagrantfile":true}}}

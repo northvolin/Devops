@@ -1,4 +1,6 @@
 Vagrant.configure("2") do |config|
+  config.ssh.insert_key = false
+
   config.vm.define "manager01" do |manager|
     manager.vm.box = "ubuntu/jammy64"
     manager.vm.network "private_network", type: "dhcp"
@@ -7,41 +9,35 @@ Vagrant.configure("2") do |config|
     end
 
     manager.vm.provision "shell", inline: <<-SHELL
-      # Установка Docker и Docker Compose
       sudo apt-get update
       sudo apt-get install -y docker.io curl
+      sudo systemctl restart ssh
 
       sudo usermod -aG docker vagrant
 
       sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
       sudo chmod +x /usr/local/bin/docker-compose
 
-      # Инициализация Docker Swarm если он еще не инициализирован
       if ! docker info | grep -q "Swarm: active"; then
         docker swarm init --advertise-addr $(hostname -I | awk '{print $2}')
       else
-        echo "Docker Swarm уже инициализирован."
+        echo "Docker Swarm already initialized."
       fi
 
-      # Получение токена и IP адреса менеджера
       SWARM_TOKEN=$(docker swarm join-token worker -q)
       MANAGER_IP=$(hostname -I | awk '{print $2}')
 
       echo $SWARM_TOKEN > /vagrant/swarm_token
       echo $MANAGER_IP > /vagrant/manager_ip
 
-      # Создание Docker конфигураций
       if ! docker config ls | grep -q "nginx_config"; then
-        echo "Создание Docker конфигурации nginx_config..."
-        docker config create nginx_config /home/vagrant/src/services/nginx/nginx.conf || { echo "Не удалось создать nginx_config"; exit 1; }
+        docker config create nginx_config /home/vagrant/src/services/nginx/nginx.conf || { echo "Failed to create nginx_config"; exit 1; }
       else
-        echo "Docker конфигурация nginx_config уже существует."
+        echo "Docker config nginx_config already exists."
       fi
 
-      # Логин в Docker Hub
       echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-      # Сборка и публикация Docker образов
       cd /home/vagrant/src
       services=("session-service" "hotel-service" "payment-service" "loyalty-service" "report-service" "booking-service" "gateway-service" "nginx")
       for service in "${services[@]}"; do
@@ -52,14 +48,30 @@ Vagrant.configure("2") do |config|
         cd ../..
       done
 
-      # Создание Docker сети
       docker network create --driver overlay my_stack_network
 
-      # Развертывание стека
-      docker stack deploy -c docker-compose.yml my_stack
+      docker stack deploy -c /home/vagrant/src/docker-compose.yml my_stack
+
+      docker volume create portainer_data
+      docker stack deploy -c /home/vagrant/src/portainer-compose.yml portainer_stack
+
+      if ! command -v newman &> /dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y npm
+        sudo npm install -g newman
+      fi
+
+      if [ -f /home/vagrant/src/application_tests.postman_collection.json ]; then
+        newman run /home/vagrant/src/application_tests.postman_collection.json -r cli,html --reporter-html-export /home/vagrant/src/newman_report.html
+      else
+        echo "Postman collection application_tests.postman_collection.json not found."
+      fi
+
+      docker node ls
+      docker stack ps my_stack
     SHELL
 
-    manager.vm.synced_folder "/home/garik/Documents/s21_projects/DevOps_7-1/src", "/home/vagrant/src", type: "rsync"
+    manager.vm.synced_folder "/home/digglega/Documents/s21_projects/DevOps_7-1/src", "/home/vagrant/src", type: "rsync"
   end
 
   config.vm.define "worker01" do |worker|
@@ -70,24 +82,31 @@ Vagrant.configure("2") do |config|
     end
 
     worker.vm.provision "shell", inline: <<-SHELL
-      # Установка Docker и Docker Compose
       sudo apt-get update
       sudo apt-get install -y docker.io curl
+      sudo systemctl restart ssh
 
       sudo usermod -aG docker vagrant
 
       sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
       sudo chmod +x /usr/local/bin/docker-compose
 
-      # Ожидание появления токена Swarm
       while [ ! -f /vagrant/swarm_token ]; do
         sleep 1
       done
       SWARM_TOKEN=$(cat /vagrant/swarm_token)
       MANAGER_IP=$(cat /vagrant/manager_ip)
 
-      # Присоединение к Docker Swarm
-      docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377
+      if docker info | grep -q "Swarm: active"; then
+        docker swarm leave --force
+      fi
+
+      for i in {1..5}; do
+        docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377 && break || {
+          echo "Failed to join Swarm, retrying in 15 seconds..."
+          sleep 15
+        }
+      done
     SHELL
   end
 
@@ -99,25 +118,31 @@ Vagrant.configure("2") do |config|
     end
 
     worker.vm.provision "shell", inline: <<-SHELL
-      # Установка Docker и Docker Compose
       sudo apt-get update
       sudo apt-get install -y docker.io curl
+      sudo systemctl restart ssh
 
       sudo usermod -aG docker vagrant
 
       sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
       sudo chmod +x /usr/local/bin/docker-compose
 
-      # Ожидание появления токена Swarm
       while [ ! -f /vagrant/swarm_token ]; do
         sleep 1
       done
       SWARM_TOKEN=$(cat /vagrant/swarm_token)
       MANAGER_IP=$(cat /vagrant/manager_ip)
 
-      # Присоединение к Docker Swarm
-      docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377
+      if docker info | grep -q "Swarm: active"; then
+        docker swarm leave --force
+      fi
+
+      for i in {1..5}; do
+        docker swarm join --token $SWARM_TOKEN $MANAGER_IP:2377 && break || {
+          echo "Failed to join Swarm, retrying in 15 seconds..."
+          sleep 15
+        }
+      done
     SHELL
   end
 end
-

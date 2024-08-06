@@ -58,7 +58,7 @@ check_docker
 
 # Stopping all Docker containers
 echo "Stopping all running containers and removing Docker artifacts..."
-sudo docker-compose down
+sudo docker-compose down || true
 sudo docker rm -f $(sudo docker ps -aq) || true
 sudo docker rmi -f $(sudo docker images -q) || true
 sudo docker network rm local-network src_local-network || true
